@@ -39,4 +39,5 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "simplecov"
 
   spec.add_runtime_dependency "redis", "~> 4.0"
+  spec.add_runtime_dependency "redis-namespace", "~> 1.6.0"
 end

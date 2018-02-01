@@ -45,10 +45,18 @@ end
 
 def redis_config
   {
-    type: :redis,
+    host: ENV.fetch('QYU_REDIS_HOST', 'localhost'),
+    port: ENV.fetch('QYU_REDIS_PORT', 6379),
+    password: ENV['QYU_REDIS_PASSWORD'],
+    db: ENV.fetch('QYU_REDIS_DB', 14), # Default db to 14 so we don't screw up with real data. (Even though we use namespace)
+    namespace: ENV.fetch('QYU_REDIS_NAMESPACE', 'qyu_test')
   }
 end
 
 def clean_up_redis
-  # TODO
+  redis = Redis.new(redis_config)
+  namespaced_redis = Redis::Namespace.new(redis_config[:namespace], :redis => redis)
+  if (keys = namespaced_redis.keys) && !keys.empty?
+    namespaced_redis.del(keys)
+  end
 end

@@ -17,51 +17,99 @@ module Qyu
         end
 
         def find_or_persist_task(name, queue_name, payload, job_id, parent_task_id)
-          # TODO
+          task_id = nil
+          existent_keys = @client.keys("task:#{name}:#{queue_name}:#{job_id}:#{parent_task_id}:*")
+
+          existent_keys.each do |task_key|
+            task = @client.hgetall(task_key)
+            task_payload = parse { task['payload'] }
+
+            if compare_payloads(task_payload, payload)
+              task_id = task['id']
+              break
+            end
+          end
+
+          unless task_id
+            task_id = SecureRandom.uuid
+            key = "task:#{name}:#{queue_name}:#{job_id}:#{parent_task_id}:#{task_id}"
+            @client.hmset(
+              key,
+              :id, task_id,
+              :name, name,
+              :queue_name, queue_name,
+              :payload, serialize { payload },
+              :job_id, job_id,
+              :parent_task_id, parent_task_id
+            )
+          end
+
+          task_id
         end
 
         def persist_workflow(name, descriptor)
-          key = "workflow:#{SecureRandom.uuid}"
-          @client.hmset(key, :name, name, :descriptor, serialize { descriptor })
-          { name: name, descriptor: descriptor }
+          id = SecureRandom.uuid
+          # TODO: Name must be uniq
+          key = "workflow:#{name}:#{id}"
+          @client.hmset(key, :name, name, :id, id, :descriptor, serialize { descriptor })
+          { 'name' => name, 'id' => id, 'descriptor' => descriptor }
         end
 
         def persist_job(workflow, payload)
-          key = "job:#{SecureRandom.uuid}"
+          id = SecureRandom.uuid
+          key = "job:#{id}"
           @client.hmset(key, :workflow, serialize { workflow }, :payload, serialize { payload })
+          { 'id' => id, 'workflow' => workflow, 'payload' => payload }
         end
 
         def find_workflow(id)
-          workflow = @client.hgetall("workflow:#{id}")
-          return if workflow.eql?({})
-          workflow[:descriptor] = parse { workflow[:descriptor] }
+          workflow_key = @client.keys("workflow:*:#{id}").first
+          return if workflow_key.nil?
+          workflow = @client.hgetall(workflow_key)
+          workflow['descriptor'] = parse { workflow['descriptor'] }
           workflow
         end
 
         def find_workflow_by_name(name)
-          # TODO should store workflow by name and scan by ID as name will be mostly used
+          workflow_key = @client.keys("workflow:#{name}:*").first
+          return if workflow_key.nil?
+          workflow = @client.hgetall(workflow_key)
+          workflow['descriptor'] = parse { workflow['descriptor'] }
+          workflow
         end
 
         def find_task(id)
-          task = @client.hgetall("task:#{id}")
-          return if task.eql?({})
-          task[:payload] = parse { task[:payload] }
+          task_key = @client.keys("task:*:*:*:*:#{id}").first
+          return if task_key.nil?
+          task = @client.hgetall(task_key)
+          task['payload'] = parse { task['payload'] }
           task
         end
 
         def find_task_ids_by_job_id_and_name(job_id, name)
-          # TODO use sets
+          task_keys = @client.keys("task:#{name}:*:#{job_id}:*:*")
+          return if task_keys.empty?
+          task_keys.map do |task_key|
+            @client.hget(task_key, 'id')
+          end.uniq
         end
 
         def find_task_ids_by_job_id_name_and_parent_task_ids(job_id, name, parent_task_ids)
-          # TODO use sets
+          task_keys = parent_task_ids.flat_map do |parent_task_id|
+            @client.keys("task:#{name}:*:#{job_id}:#{parent_task_id}:*")
+          end
+          return if task_keys.empty?
+          task_keys.map do |task_key|
+            @client.hget(task_key, 'id')
+          end.uniq
         end
 
         def find_job(id)
           job = @client.hgetall("job:#{id}")
           return if job.eql?({})
-          job[:payload] = parse { job[:payload] }
-          job[:workflow] = parse { job[:workflow] }
+          job['id'] = id
+          job['payload'] = parse { job['payload'] }
+          job['workflow'] = parse { job['workflow'] }
           job
         end
 
@@ -70,11 +118,17 @@ module Qyu
         end
 
         def select_tasks_by_job_id(job_id)
-          # TODO get tasks that belong to job
+          task_keys = @client.keys("task:*:*:#{job_id}:*:*")
+          return if task_keys.empty?
+          task_keys.map do |task_key|
+            task = @client.hgetall(task_key)
+            task['payload'] = parse { task['payload'] }
+            task
+          end
         end
 
         def count_jobs
-          @client.keys["job:*"].count
+          @client.keys("job:*").count
         end
 
         def lock_task!(id, lease_time)
@@ -144,16 +198,17 @@ module Qyu
         private
 
         def compare_payloads(payload1, payload2)
-          sort(payload1) == sort(payload2)
+          symbolize_hash(payload1) == symbolize_hash(payload2)
         end
 
-        def sort(payload)
-          payload
+        def symbolize_hash(hash)
+          hash.map { |key, value| [key.to_sym, value] }.to_h
         end
 
         def init_client(config)
           load_config(config)
-          @client = ::Redis.new(@@redis_configuration)
+          redis_client = ::Redis.new(@@redis_configuration)
+          @client = ::Redis::Namespace.new(@@redis_configuration[:namespace], :redis => redis_client)
         end
 
         def load_config(config)
@@ -173,6 +228,7 @@ module Qyu
           @@redis_configuration[:connect_timeout] = config[:connect_timeout] if config[:connect_timeout]
           @@redis_configuration[:read_timeout] = config[:read_timeout] if config[:read_timeout]
           @@redis_configuration[:write_timeout] = config[:write_timeout] if config[:write_timeout]
+          @@redis_configuration[:namespace] = config.fetch(:namespace) { 'qyu' }
           true
         end
 
