@@ -43,7 +43,7 @@ Qyu.configure(
     password: redis_password,
     db: redis_db_number,
     lease_period: 60
-},
+  },
   # optional Defaults to STDOUT
   logger: Logger.new(STDOUT)
 )
