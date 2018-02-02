@@ -183,6 +183,3 @@ module Qyu
     end
   end
 end
-
-Qyu::Config::StoreConfig.register(Qyu::Store::Redis::Adapter) if defined?(Qyu::Config::StoreConfig)
-Qyu::Factory::StoreFactory.register(Qyu::Store::Redis::Adapter) if defined?(Qyu::Factory::StoreFactory)
