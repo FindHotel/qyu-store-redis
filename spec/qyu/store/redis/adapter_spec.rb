@@ -199,7 +199,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
 
     describe '#find_job' do
       let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
+      let(:job) { adapter.persist_job(workflow, { 'payload' => 'foo' }) }
 
       it 'returns workflow' do
         found_job = adapter.find_job(job['id'])
@@ -208,7 +208,37 @@ RSpec.describe Qyu::Store::Redis::Adapter do
     end
 
     describe '#select_jobs' do
-      # TODO
+      context 'when exists jobs' do
+        let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
+        let!(:job) { adapter.persist_job(workflow, { 'payload' => 'foo' }) }
+        let!(:job2) { adapter.persist_job(workflow, { 'payload' => 'bar' }) }
+
+        it 'returns the correct quantity' do
+          selected_jobs = adapter.select_jobs(2, 0)
+          expect(selected_jobs.count).to eq(2)
+
+          selected_jobs = adapter.select_jobs(1, 0)
+          expect(selected_jobs.count).to eq(1)
+        end
+
+        it 'return all values' do
+          selected_job = adapter.select_jobs(1, 0).first
+
+          expect(selected_job['payload']).not_to be_empty
+          expect(selected_job['workflow']).not_to be_empty
+          expect(selected_job['id']).not_to be_nil
+        end
+      end
+
+      context 'when jobs does not exist' do
+        it 'always returns an empty array' do
+          selected_jobs = adapter.select_jobs(2, 0)
+          expect(selected_jobs).to eq([])
+
+          selected_jobs = adapter.select_jobs(1, 1)
+          expect(selected_jobs).to eq([])
+        end
+      end
     end
 
     describe '#select_tasks_by_job_id' do
@@ -254,20 +284,161 @@ RSpec.describe Qyu::Store::Redis::Adapter do
       it { expect(adapter.count_jobs).to eq 2 }
     end
 
-    describe '#lock_task' do
-      # TODO
+    describe '#lock_task!' do
+      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
+      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
+      let(:task_attributes) do
+        {
+          'name' => 'task_test',
+          'queue_name' => 'queue_test',
+          'payload' => { foo: 'bar' },
+          'job_id' => job['id'],
+          'parent_task_id' => 1010
+        }
+      end
+
+      context 'when task exists' do
+        let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
+        let(:lease_time) { 60 }
+
+        it 'returns locked_by string and locked_until time' do
+          locked = adapter.lock_task!(task_id, lease_time)
+
+          expect(locked[0]).to be_a(String)
+          expect(locked[1]).to be_within(1).of(Time.now + lease_time)
+        end
+      end
+
+      context 'when task does not exists' do
+        let(:task_id) { 'foobar' }
+
+        it 'returns locked_by nil and locked_until nil' do
+          locked = adapter.lock_task!(task_id, 60)
+
+          expect(locked).to eq([nil, nil])
+        end
+      end
     end
 
-    describe '#lock_task' do
-      # TODO
+    describe '#unlock_task!' do
+      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
+      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
+      let(:task_attributes) do
+        {
+          'name' => 'task_test',
+          'queue_name' => 'queue_test',
+          'payload' => { foo: 'bar' },
+          'job_id' => job['id'],
+          'parent_task_id' => 1010
+        }
+      end
+
+      context 'when task exists' do
+        let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
+        let(:lease_token) { adapter.lock_task!(task_id, 60)[0] }
+
+        it 'returns true' do
+          unlocked = adapter.unlock_task!(task_id, lease_token)
+
+          expect(unlocked).to be true
+        end
+
+        it 'unlock task' do
+          adapter.unlock_task!(task_id, lease_token)
+          
+          task = adapter.find_task(task_id)
+
+          expect(task['locked_by']).to be_empty
+          expect(task['locked_until']).to be_empty
+        end
+      end
+
+      context 'when task does not exists' do
+        let(:task_id) { 'foobar' }
+        it 'returns locked_by nil and locked_until nil' do
+          unlocked = adapter.unlock_task!(task_id, 60)
+
+          expect(unlocked).to be false
+        end
+      end
     end
 
     describe '#renew_lock_lease' do
-      # TODO
+      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
+      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
+      let(:lease_time) { 60 }
+      let(:task_attributes) do
+        {
+          'name' => 'task_test',
+          'queue_name' => 'queue_test',
+          'payload' => { foo: 'bar' },
+          'job_id' => job['id'],
+          'parent_task_id' => 1010
+        }
+      end
+
+      context 'when task exists' do
+        let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
+        let(:lease_token) { adapter.lock_task!(task_id, lease_time)[0] }
+
+        it 'returns new locked_until value' do
+          renewed_lock = adapter.renew_lock_lease(task_id, lease_time, lease_token)
+          expect(renewed_lock).to be_within(1).of(Time.now + lease_time)
+        end
+      end
+
+      context 'when task does not exists' do
+        let(:task_id) { 'foobar' }
+        let(:lease_token) { 'foobar' }
+
+        it 'returns locked_by nil and locked_until nil' do
+          unlocked = adapter.renew_lock_lease(task_id, lease_time, lease_token)
+
+          expect(unlocked).to be nil
+        end
+      end
     end
 
     describe '#update_status' do
-      # TODO
+      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
+      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
+      let(:status) { 'completed' }
+      let(:task_attributes) do
+        {
+          'name' => 'task_test',
+          'queue_name' => 'queue_test',
+          'payload' => { foo: 'bar' },
+          'job_id' => job['id'],
+          'parent_task_id' => 1010
+        }
+      end
+
+      context 'when task exists' do
+        let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
+
+        it 'returns true' do
+          updated = adapter.update_status(task_id, status)
+          expect(updated).to be true
+        end
+
+        it 'set new status on task' do
+          updated = adapter.update_status(task_id, status)
+          
+          task = adapter.find_task(task_id)
+
+          expect(task['status']).to eq(status)
+        end
+      end
+
+      context 'when task does not exists' do
+        let(:task_id) { 'foobar' }
+
+        it 'returns locked_by nil and locked_until nil' do
+          updated = adapter.update_status(task_id, status)
+
+          expect(updated).to be nil
+        end
+      end
     end
   end
 end

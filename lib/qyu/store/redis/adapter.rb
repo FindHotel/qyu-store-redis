@@ -58,7 +58,11 @@ module Qyu
         def persist_job(workflow, payload)
           id = SecureRandom.uuid
           key = "job:#{id}"
-          @client.hmset(key, :workflow, serialize { workflow }, :payload, serialize { payload })
+          @client.hmset(key, 
+            :id, id, 
+            :workflow, serialize { workflow }, 
+            :payload, serialize { payload }
+          )
           { 'id' => id, 'workflow' => workflow, 'payload' => payload }
         end
 
@@ -113,8 +117,17 @@ module Qyu
           job
         end
 
-        def select_jobs(limit, offset, order = :asc)
-          # TODO jobs embedded in them their workflows
+        def select_jobs(limit, offset, order = nil)
+          job_keys = @client.keys('job:*')
+          partial_job_keys = job_keys[offset.to_i, limit.to_i]
+          return [] unless partial_job_keys
+          
+          partial_job_keys.map do |job_key|
+            job = @client.hgetall(job_key)
+            job['payload'] = parse { job['payload'] }
+            job['workflow'] = parse { job['workflow'] }
+            job
+          end
         end
 
         def select_tasks_by_job_id(job_id)
@@ -134,29 +147,31 @@ module Qyu
         def lock_task!(id, lease_time)
           Qyu.logger.debug '[LOCK] lock_task!'
 
-          uuid = SecureRandom.uuid
-          Qyu.logger.debug "[LOCK] uuid = #{uuid}"
-
-          locked_until = seconds_after_time(lease_time)
-          Qyu.logger.debug "[LOCK] locked_until = #{locked_until}"
-
-          key = "task:#{id}"
+          task_key = @client.keys("task:*:*:*:*:#{id}").first
           task = find_task(id)
-          # TODO raise task not found
+          return [nil, nil] unless task
+
           response = nil
-          if task['locked_until'].eql?('') || DateTime.parse(task['locked_until']) < DateTime.now
-            response = redis.hmset(key, 'locked_by', uuid, 'locked_until', locked_until).eql?('OK')
+          if task['locked_until'].nil? || DateTime.parse(task['locked_until']) < DateTime.now
+            uuid = SecureRandom.uuid
+            Qyu.logger.debug "[LOCK] uuid = #{uuid}"
+
+            locked_until = seconds_after_time(lease_time)
+            Qyu.logger.debug "[LOCK] locked_until = #{locked_until}"
+
+            response = @client.hmset(task_key, 'locked_by', uuid, 'locked_until', locked_until)
           end
 
           response.eql?('OK') ? [uuid, locked_until] : [nil, nil]
         end
 
         def unlock_task!(id, lease_token)
-          key = "task:#{id}"
+          task_key = @client.keys("task:*:*:*:*:#{id}").first
           task = find_task(id)
-          # TODO raise task not found
+          return false unless task
+
           if task['locked_by'].eql?(lease_token)
-            redis.hmset(key, 'locked_by', nil, 'locked_until', nil).eql?('OK')
+            @client.hmset(task_key, 'locked_by', nil, 'locked_until', nil).eql?('OK')
           else
             false
           end
@@ -165,12 +180,15 @@ module Qyu
         def renew_lock_lease(id, lease_time, lease_token)
           Qyu.logger.debug "renew_lock_lease id = #{id}, lease_time = #{lease_time}, lease_token = #{lease_token}"
 
-          key = "task:#{id}"
+          task_key = @client.keys("task:*:*:*:*:#{id}").first
           task = find_task(id)
-          # TODO raise task not found
-          return nil if task['locked_until'].eql?('')
+          return nil unless task&.fetch('locked_until')
+
           if task['locked_by'].eql?(lease_token) && DateTime.parse(task['locked_until']) > DateTime.now
-            redis.hmset(key, 'locked_until', seconds_after_time(lease_time))
+            locked_until = seconds_after_time(lease_time)
+            Qyu.logger.debug "[LOCK] locked_until = #{locked_until}"
+
+            @client.hmset(task_key, 'locked_until', locked_until)
             locked_until
           else
             return nil
@@ -178,8 +196,9 @@ module Qyu
         end
 
         def update_status(id, status)
-          key = "task:#{id}"
-          redis.hmset(key, 'status', status).eql?('OK')
+          task_key = @client.keys("task:*:*:*:*:#{id}").first
+          return nil unless task_key
+          @client.hmset(task_key, 'status', status).eql?('OK')
         end
 
         def serialize
