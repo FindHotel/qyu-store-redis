@@ -1,51 +1,15 @@
 RSpec.describe Qyu::Store::Redis::Adapter do
   let(:adapter) { described_class.new(redis_config) }
 
-  context 'class methods' do
-    describe '.valid_config?' do
-      context 'input config is valid' do
-        it do
-          expect(described_class.valid_config?({})).to be true
-        end
+  describe '.valid_config?' do
+    context 'input config is valid' do
+      it do
+        expect(described_class.valid_config?({})).to be true
       end
     end
   end
-
-  context 'instance methods' do
-    describe '#find_or_persist_task' do
-      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
-      let(:task) do
-        {
-          'name' => 'task_test',
-          'queue_name' => 'queue_test',
-          'payload' => { foo: 'bar' },
-          'job_id' => job['id'],
-          'parent_task_id' => 1010
-        }
-      end
-
-      it 'returns the task id' do
-        task_id = adapter.find_or_persist_task(*task.values)
-        expect(task_id).not_to be_nil
-      end
-
-      it 'does not create task when it already exists' do
-        task1_id = adapter.find_or_persist_task(*task.values)
-        task2_id = adapter.find_or_persist_task(*task.values)
-
-        expect(task1_id).to eq(task2_id)
-      end
-
-      it 'create new task if payload is different' do
-        task1_id = adapter.find_or_persist_task(*task.values)
-        task['payload'] = { bar: 'foo' }
-        task2_id = adapter.find_or_persist_task(*task.values)
-
-        expect(task1_id).not_to eq(task2_id)
-      end
-    end
-
+  
+  describe 'workflow operations' do
     describe '#persist_workflow' do
       it 'stores workflow on redis' do
         workflow = adapter.persist_workflow('test-workflow', {})
@@ -55,13 +19,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
         expect(found_workflow['descriptor']).to eq(workflow['descriptor'])
       end
     end
-
-    describe '#persist_job' do
-      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-
-      it { expect { adapter.persist_job(workflow, { payload: 'foo' }) }.to change { adapter.count_jobs } }
-    end
-
+    
     describe '#find_workflow' do
       let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
 
@@ -83,118 +41,13 @@ RSpec.describe Qyu::Store::Redis::Adapter do
         expect(found_workflow['descriptor']).to eq(workflow['descriptor'])
       end
     end
+  end
 
-    describe '#find_task' do
+  describe 'job operations' do
+    describe '#persist_job' do
       let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
-      let(:task_attributes) do
-        {
-          'name' => 'task_test',
-          'queue_name' => 'queue_test',
-          'payload' => { foo: 'bar' },
-          'job_id' => job['id'],
-          'parent_task_id' => 1010
-        }
-      end
 
-      context 'when task exists' do
-        let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
-        it 'returns task object' do
-          expect(adapter.find_task(task_id)['id']).to eq(task_id)
-        end
-      end
-
-      context 'when task does not exists' do
-        let(:task_id) { 1111 }
-        it 'returns nil' do
-          expect(adapter.find_task(task_id)).to be_nil
-        end
-      end
-    end
-
-    describe '#find_task_ids_by_job_id_and_name' do
-      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
-      let(:task_attributes) do
-        {
-          'name' => 'task_test',
-          'queue_name' => 'queue_test',
-          'payload' => { foo: 'bar' },
-          'job_id' => job['id'],
-          'parent_task_id' => 1010
-        }
-      end
-
-      context 'when task exists' do
-        it 'returns task ids' do
-          task1_id = adapter.find_or_persist_task(*task_attributes.values)
-          task_attributes['payload'] = { bar: 'foo' }
-          task2_id = adapter.find_or_persist_task(*task_attributes.values)
-
-          task_ids = adapter.find_task_ids_by_job_id_and_name(job['id'], task_attributes['name'])
-
-          expect(task_ids).to match_array([task1_id, task2_id])
-        end
-      end
-
-      context 'when task does not exists' do
-        it 'returns nil' do
-          expect(adapter.find_task_ids_by_job_id_and_name(111, 'name')).to be_nil
-        end
-      end
-    end
-
-    describe '#find_task_ids_by_job_id_name_and_parent_task_ids' do
-      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
-      let(:task_attributes) do
-        {
-          'name' => 'task_test',
-          'queue_name' => 'queue_test',
-          'payload' => { foo: 'bar' },
-          'job_id' => job['id'],
-          'parent_task_id' => 1010
-        }
-      end
-
-      context 'when tasks exists' do
-        context 'when exists tasks for all parent_tasks_ids' do
-          it 'returns task ids' do
-            task1_id = adapter.find_or_persist_task(*task_attributes.values)
-            task_attributes['parent_task_id'] = 2020
-            task2_id = adapter.find_or_persist_task(*task_attributes.values)
-
-            task_ids = adapter.find_task_ids_by_job_id_name_and_parent_task_ids(
-              job['id'],
-              task_attributes['name'],
-              [1010, 2020]
-            )
-
-            expect(task_ids).to match_array([task1_id, task2_id])
-          end
-        end
-
-        context 'when exists tasks for only some parent_tasks_ids' do
-          it 'returns task ids' do
-            task1_id = adapter.find_or_persist_task(*task_attributes.values)
-            task2_id = adapter.find_or_persist_task(*task_attributes.values)
-
-            task_ids = adapter.find_task_ids_by_job_id_name_and_parent_task_ids(
-              job['id'],
-              task_attributes['name'],
-              [1010, 2020]
-            )
-
-            expect(task_ids).to match_array([task1_id])
-          end
-        end
-      end
-
-      context 'when task does not exists' do
-        it 'returns nil' do
-          expect(adapter.find_task_ids_by_job_id_name_and_parent_task_ids(111, 'name', [1010])).to be_nil
-        end
-      end
+      it { expect { adapter.persist_job(workflow, { payload: 'foo' }) }.to change { adapter.count_jobs } }
     end
 
     describe '#find_job' do
@@ -241,19 +94,130 @@ RSpec.describe Qyu::Store::Redis::Adapter do
       end
     end
 
-    describe '#select_tasks_by_job_id' do
-      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
-      let(:task_attributes) do
-        {
-          'name' => 'task_test',
-          'queue_name' => 'queue_test',
-          'payload' => { foo: 'bar' },
-          'job_id' => job['id'],
-          'parent_task_id' => 1010
-        }
+    describe '#count_jobs' do
+      before do
+        workflow = adapter.persist_workflow('test-workflow', {})
+        adapter.persist_job(workflow, { payload: 'foo' })
+        adapter.persist_job(workflow, { payload: 'foo2' })
       end
 
+      it { expect(adapter.count_jobs).to eq 2 }
+    end
+  end
+
+  describe 'task operations' do
+    let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
+    let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
+    let(:task_attributes) do
+      {
+        'name' => 'task_test',
+        'queue_name' => 'queue_test',
+        'payload' => { foo: 'bar' },
+        'job_id' => job['id'],
+        'parent_task_id' => 1010
+      }
+    end
+
+    describe '#find_or_persist_task' do
+      it 'returns the task id' do
+        task_id = adapter.find_or_persist_task(*task_attributes.values)
+        expect(task_id).not_to be_nil
+      end
+
+      it 'does not create task when it already exists' do
+        task1_id = adapter.find_or_persist_task(*task_attributes.values)
+        task2_id = adapter.find_or_persist_task(*task_attributes.values)
+
+        expect(task1_id).to eq(task2_id)
+      end
+
+      it 'create new task if payload is different' do
+        task1_id = adapter.find_or_persist_task(*task_attributes.values)
+        task_attributes['payload'] = { bar: 'foo' }
+        task2_id = adapter.find_or_persist_task(*task_attributes.values)
+
+        expect(task1_id).not_to eq(task2_id)
+      end
+    end
+
+    describe '#find_task' do
+      context 'when task exists' do
+        let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
+        it 'returns task object' do
+          expect(adapter.find_task(task_id)['id']).to eq(task_id)
+        end
+      end
+
+      context 'when task does not exists' do
+        let(:task_id) { 1111 }
+        it 'returns nil' do
+          expect(adapter.find_task(task_id)).to be_nil
+        end
+      end
+    end
+
+    describe '#find_task_ids_by_job_id_and_name' do
+      context 'when task exists' do
+        it 'returns task ids' do
+          task1_id = adapter.find_or_persist_task(*task_attributes.values)
+          task_attributes['payload'] = { bar: 'foo' }
+          task2_id = adapter.find_or_persist_task(*task_attributes.values)
+
+          task_ids = adapter.find_task_ids_by_job_id_and_name(job['id'], task_attributes['name'])
+
+          expect(task_ids).to match_array([task1_id, task2_id])
+        end
+      end
+
+      context 'when task does not exists' do
+        it 'returns nil' do
+          expect(adapter.find_task_ids_by_job_id_and_name(111, 'name')).to be_nil
+        end
+      end
+    end
+
+    describe '#find_task_ids_by_job_id_name_and_parent_task_ids' do
+      context 'when tasks exists' do
+        context 'when exists tasks for all parent_tasks_ids' do
+          it 'returns task ids' do
+            task1_id = adapter.find_or_persist_task(*task_attributes.values)
+            task_attributes['parent_task_id'] = 2020
+            task2_id = adapter.find_or_persist_task(*task_attributes.values)
+
+            task_ids = adapter.find_task_ids_by_job_id_name_and_parent_task_ids(
+              job['id'],
+              task_attributes['name'],
+              [1010, 2020]
+            )
+
+            expect(task_ids).to match_array([task1_id, task2_id])
+          end
+        end
+
+        context 'when exists tasks for only some parent_tasks_ids' do
+          it 'returns task ids' do
+            task1_id = adapter.find_or_persist_task(*task_attributes.values)
+            task2_id = adapter.find_or_persist_task(*task_attributes.values)
+
+            task_ids = adapter.find_task_ids_by_job_id_name_and_parent_task_ids(
+              job['id'],
+              task_attributes['name'],
+              [1010, 2020]
+            )
+
+            expect(task_ids).to match_array([task1_id])
+          end
+        end
+      end
+
+      context 'when task does not exists' do
+        it 'returns nil' do
+          expect(adapter.find_task_ids_by_job_id_name_and_parent_task_ids(111, 'name', [1010])).to be_nil
+        end
+      end
+    end
+
+    describe '#select_tasks_by_job_id' do
       context 'when task exists' do
         it 'returns task ids' do
           task1_id = adapter.find_or_persist_task(*task_attributes.values)
@@ -274,29 +238,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
       end
     end
 
-    describe '#count_jobs' do
-      before do
-        workflow = adapter.persist_workflow('test-workflow', {})
-        adapter.persist_job(workflow, { payload: 'foo' })
-        adapter.persist_job(workflow, { payload: 'foo2' })
-      end
-
-      it { expect(adapter.count_jobs).to eq 2 }
-    end
-
     describe '#lock_task!' do
-      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
-      let(:task_attributes) do
-        {
-          'name' => 'task_test',
-          'queue_name' => 'queue_test',
-          'payload' => { foo: 'bar' },
-          'job_id' => job['id'],
-          'parent_task_id' => 1010
-        }
-      end
-
       context 'when task exists' do
         let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
         let(:lease_time) { 60 }
@@ -321,18 +263,6 @@ RSpec.describe Qyu::Store::Redis::Adapter do
     end
 
     describe '#unlock_task!' do
-      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
-      let(:task_attributes) do
-        {
-          'name' => 'task_test',
-          'queue_name' => 'queue_test',
-          'payload' => { foo: 'bar' },
-          'job_id' => job['id'],
-          'parent_task_id' => 1010
-        }
-      end
-
       context 'when task exists' do
         let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
         let(:lease_token) { adapter.lock_task!(task_id, 60)[0] }
@@ -364,19 +294,8 @@ RSpec.describe Qyu::Store::Redis::Adapter do
     end
 
     describe '#renew_lock_lease' do
-      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
       let(:lease_time) { 60 }
-      let(:task_attributes) do
-        {
-          'name' => 'task_test',
-          'queue_name' => 'queue_test',
-          'payload' => { foo: 'bar' },
-          'job_id' => job['id'],
-          'parent_task_id' => 1010
-        }
-      end
-
+      
       context 'when task exists' do
         let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
         let(:lease_token) { adapter.lock_task!(task_id, lease_time)[0] }
@@ -400,19 +319,8 @@ RSpec.describe Qyu::Store::Redis::Adapter do
     end
 
     describe '#update_status' do
-      let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
       let(:status) { 'completed' }
-      let(:task_attributes) do
-        {
-          'name' => 'task_test',
-          'queue_name' => 'queue_test',
-          'payload' => { foo: 'bar' },
-          'job_id' => job['id'],
-          'parent_task_id' => 1010
-        }
-      end
-
+      
       context 'when task exists' do
         let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
 
@@ -441,4 +349,5 @@ RSpec.describe Qyu::Store::Redis::Adapter do
       end
     end
   end
+  
 end
