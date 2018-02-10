@@ -3,6 +3,7 @@ require 'securerandom'
 module Qyu
   module Store
     module Redis
+      # Qyu::Store::Redis::Adapter
       class Adapter < Qyu::Store::Redis.interface
         TYPE = :redis
 

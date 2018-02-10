@@ -6,7 +6,7 @@ require 'logger'
 
 SimpleCov.start
 
-require "qyu/store/redis"
+require 'qyu/store/redis'
 
 require 'pry'
 
@@ -20,7 +20,6 @@ RSpec.configure do |config|
   config.expect_with :rspec do |c|
     c.syntax = :expect
   end
-
 
   config.before(:each) do
     # ignore_puts
@@ -54,7 +53,7 @@ end
 
 def clean_up_redis
   redis = Redis.new(redis_config)
-  namespaced_redis = Redis::Namespace.new(redis_config[:namespace], :redis => redis)
+  namespaced_redis = Redis::Namespace.new(redis_config[:namespace], redis: redis)
   if (keys = namespaced_redis.keys) && !keys.empty?
     namespaced_redis.del(keys)
   end

@@ -25,7 +25,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
       end
     end
   end
-  
+
   describe 'workflow operations' do
     describe '#persist_workflow' do
       it 'stores workflow on redis' do
@@ -42,7 +42,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
         expect { adapter.persist_workflow('test-workflow', {}) }.to raise_error(Qyu::Store::Redis::Errors::WorkflowNotUnique)
       end
     end
-    
+
     describe '#find_workflow' do
       let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
 
@@ -106,12 +106,12 @@ RSpec.describe Qyu::Store::Redis::Adapter do
     describe '#persist_job' do
       let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
 
-      it { expect { adapter.persist_job(workflow, { payload: 'foo' }) }.to change { adapter.count_jobs } }
+      it { expect { adapter.persist_job(workflow, payload: 'foo') }.to change { adapter.count_jobs } }
     end
 
     describe '#find_job' do
       let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-      let(:job) { adapter.persist_job(workflow, { 'payload' => 'foo' }) }
+      let(:job) { adapter.persist_job(workflow, 'payload' => 'foo') }
 
       it 'returns workflow' do
         found_job = adapter.find_job(job['id'])
@@ -122,8 +122,8 @@ RSpec.describe Qyu::Store::Redis::Adapter do
     describe '#select_jobs' do
       context 'when exists jobs' do
         let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-        let!(:job) { adapter.persist_job(workflow, { 'payload' => 'foo' }) }
-        let!(:job2) { adapter.persist_job(workflow, { 'payload' => 'bar' }) }
+        let!(:job) { adapter.persist_job(workflow, 'payload' => 'foo') }
+        let!(:job2) { adapter.persist_job(workflow, 'payload' => 'bar') }
 
         it 'returns the correct quantity' do
           selected_jobs = adapter.select_jobs(2, 0)
@@ -156,8 +156,8 @@ RSpec.describe Qyu::Store::Redis::Adapter do
     describe '#count_jobs' do
       before do
         workflow = adapter.persist_workflow('test-workflow', {})
-        adapter.persist_job(workflow, { payload: 'foo' })
-        adapter.persist_job(workflow, { payload: 'foo2' })
+        adapter.persist_job(workflow, payload: 'foo')
+        adapter.persist_job(workflow, payload: 'foo2')
       end
 
       it { expect(adapter.count_jobs).to eq 2 }
@@ -166,7 +166,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
     describe '#delete_job' do
       context 'when job exists' do
         let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-        let!(:job) { adapter.persist_job(workflow, { 'payload' => 'foo' }) }
+        let!(:job) { adapter.persist_job(workflow, 'payload' => 'foo') }
 
         it 'returns true' do
           deleted = adapter.delete_job(job['id'])
@@ -185,7 +185,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
 
   describe 'task operations' do
     let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
-    let(:job) { adapter.persist_job(workflow, { payload: 'foo' }) }
+    let(:job) { adapter.persist_job(workflow, payload: 'foo') }
     let(:task_attributes) do
       {
         'name' => 'task_test',
@@ -304,7 +304,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
 
           tasks = adapter.select_tasks_by_job_id(job['id'])
 
-          task_ids = tasks.map{ |task| task['id'] }
+          task_ids = tasks.map { |task| task['id'] }
           expect(task_ids).to match_array([task1_id, task2_id])
         end
       end
@@ -351,7 +351,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
 
         it 'unlock task' do
           adapter.unlock_task!(task_id, lease_token)
-          
+
           task = adapter.find_task(task_id)
 
           expect(task['locked_by']).to be_empty
@@ -369,7 +369,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
 
     describe '#renew_lock_lease' do
       let(:lease_time) { 60 }
-      
+
       context 'when task exists' do
         let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
         let(:lease_token) { adapter.lock_task!(task_id, lease_time)[0] }
@@ -394,7 +394,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
 
     describe '#update_status' do
       let(:status) { 'completed' }
-      
+
       context 'when task exists' do
         let(:task_id) { adapter.find_or_persist_task(*task_attributes.values) }
 
@@ -405,7 +405,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
 
         it 'set new status on task' do
           updated = adapter.update_status(task_id, status)
-          
+
           task = adapter.find_task(task_id)
 
           expect(task['status']).to eq(status)
@@ -421,5 +421,4 @@ RSpec.describe Qyu::Store::Redis::Adapter do
       end
     end
   end
-  
 end

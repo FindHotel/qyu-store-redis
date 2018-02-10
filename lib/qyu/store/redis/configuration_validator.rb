@@ -1,8 +1,9 @@
 module Qyu
   module Store
     module Redis
+      # Qyu::Store::Redis::ConfigurationValidator
       class ConfigurationValidator
-        REQUIRED_ATTRIBUTES = %i(host port).freeze
+        REQUIRED_ATTRIBUTES = %i[host port].freeze
 
         attr_reader :errors
 

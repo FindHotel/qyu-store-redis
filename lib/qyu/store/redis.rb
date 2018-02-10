@@ -1,4 +1,4 @@
-require_relative "./redis/version"
+require_relative './redis/version'
 require_relative './redis/errors'
 require 'json'
 require 'redis'
