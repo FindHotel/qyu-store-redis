@@ -35,6 +35,12 @@ RSpec.describe Qyu::Store::Redis::Adapter do
         expect(found_workflow['name']).to eq(workflow['name'])
         expect(found_workflow['descriptor']).to eq(workflow['descriptor'])
       end
+
+      it 'does not store workflows with the same name' do
+        adapter.persist_workflow('test-workflow', {})
+
+        expect { adapter.persist_workflow('test-workflow', {}) }.to raise_error(Qyu::Store::Redis::Errors::WorkflowNotUnique)
+      end
     end
     
     describe '#find_workflow' do
@@ -56,6 +62,42 @@ RSpec.describe Qyu::Store::Redis::Adapter do
 
         expect(found_workflow['id']).to eq(workflow['id'])
         expect(found_workflow['descriptor']).to eq(workflow['descriptor'])
+      end
+    end
+
+    describe '#delete_workflow' do
+      context 'when workflow exists' do
+        let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
+
+        it 'returns true' do
+          deleted = adapter.delete_workflow(workflow['id'])
+          expect(deleted).to be true
+        end
+      end
+
+      context 'when workflow does not exist' do
+        it 'returns false' do
+          deleted = adapter.delete_workflow(9999)
+          expect(deleted).to be false
+        end
+      end
+    end
+
+    describe '#delete_workflow_by_name' do
+      context 'when workflow exists' do
+        let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
+
+        it 'returns true' do
+          deleted = adapter.delete_workflow_by_name(workflow['name'])
+          expect(deleted).to be true
+        end
+      end
+
+      context 'when workflow does not exist' do
+        it 'returns false' do
+          deleted = adapter.delete_workflow_by_name('foobar')
+          expect(deleted).to be false
+        end
       end
     end
   end
@@ -119,6 +161,25 @@ RSpec.describe Qyu::Store::Redis::Adapter do
       end
 
       it { expect(adapter.count_jobs).to eq 2 }
+    end
+
+    describe '#delete_job' do
+      context 'when job exists' do
+        let(:workflow) { adapter.persist_workflow('test-workflow', {}) }
+        let!(:job) { adapter.persist_job(workflow, { 'payload' => 'foo' }) }
+
+        it 'returns true' do
+          deleted = adapter.delete_job(job['id'])
+          expect(deleted).to be true
+        end
+      end
+
+      context 'when job does not exist' do
+        it 'returns false' do
+          deleted = adapter.delete_job(9999)
+          expect(deleted).to be false
+        end
+      end
     end
   end
 
@@ -271,10 +332,8 @@ RSpec.describe Qyu::Store::Redis::Adapter do
       context 'when task does not exists' do
         let(:task_id) { 'foobar' }
 
-        it 'returns locked_by nil and locked_until nil' do
-          locked = adapter.lock_task!(task_id, 60)
-
-          expect(locked).to eq([nil, nil])
+        it 'raise TaskNotFound' do
+          expect { adapter.lock_task!(task_id, 60) }.to raise_error(Qyu::Store::Redis::Errors::TaskNotFound)
         end
       end
     end
@@ -303,9 +362,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
       context 'when task does not exists' do
         let(:task_id) { 'foobar' }
         it 'returns locked_by nil and locked_until nil' do
-          unlocked = adapter.unlock_task!(task_id, 60)
-
-          expect(unlocked).to be false
+          expect { adapter.unlock_task!(task_id, 60) }.to raise_error(Qyu::Store::Redis::Errors::TaskNotFound)
         end
       end
     end
@@ -359,9 +416,7 @@ RSpec.describe Qyu::Store::Redis::Adapter do
         let(:task_id) { 'foobar' }
 
         it 'returns locked_by nil and locked_until nil' do
-          updated = adapter.update_status(task_id, status)
-
-          expect(updated).to be nil
+          expect { adapter.update_status(task_id, status) }.to raise_error(Qyu::Store::Redis::Errors::TaskNotFound)
         end
       end
     end

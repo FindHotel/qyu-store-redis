@@ -19,7 +19,7 @@ module Qyu
         ## Workflow
         def persist_workflow(name, descriptor)
           id = SecureRandom.uuid
-          # TODO: Name must be uniq
+          validate_workflow!(name)
           key = "workflow:#{name}:#{id}"
           @client.hmset(key, :name, name, :id, id, :descriptor, serialize { descriptor })
           { 'name' => name, 'id' => id, 'descriptor' => descriptor }
@@ -42,11 +42,15 @@ module Qyu
         end
 
         def delete_workflow(id)
-          # TODO
+          workflow_key = @client.keys("workflow:*:#{id}").first
+          deleted = @client.del(workflow_key)
+          deleted > 0
         end
 
         def delete_workflow_by_name(name)
-          # TODO
+          workflow_key = @client.keys("workflow:#{name}:*").first
+          deleted = @client.del(workflow_key)
+          deleted > 0
         end
 
         ## Job
@@ -88,7 +92,8 @@ module Qyu
         end
 
         def delete_job(id)
-          # TODO
+          deleted = @client.del("job:#{id}")
+          deleted > 0
         end
 
         def clear_completed_jobs
@@ -168,7 +173,7 @@ module Qyu
 
           task_key = @client.keys("task:*:*:*:*:#{id}").first
           task = find_task(id)
-          return [nil, nil] unless task
+          raise Qyu::Store::Redis::Errors::TaskNotFound unless task
 
           response = nil
           if task['locked_until'].nil? || DateTime.parse(task['locked_until']) < DateTime.now
@@ -187,7 +192,7 @@ module Qyu
         def unlock_task!(id, lease_token)
           task_key = @client.keys("task:*:*:*:*:#{id}").first
           task = find_task(id)
-          return false unless task
+          raise Qyu::Store::Redis::Errors::TaskNotFound unless task
 
           if task['locked_by'].eql?(lease_token)
             @client.hmset(task_key, 'locked_by', nil, 'locked_until', nil).eql?('OK')
@@ -216,7 +221,7 @@ module Qyu
 
         def update_status(id, status)
           task_key = @client.keys("task:*:*:*:*:#{id}").first
-          return nil unless task_key
+          raise Qyu::Store::Redis::Errors::TaskNotFound unless task_key
           @client.hmset(task_key, 'status', status).eql?('OK')
         end
 
@@ -237,6 +242,11 @@ module Qyu
 
         def parse
           JSON.parse(yield)
+        end
+
+        def validate_workflow!(name)
+          workflow_keys = @client.keys("workflow:#{name}:*")
+          raise Qyu::Store::Redis::Errors::WorkflowNotUnique if workflow_keys.any?
         end
 
         def compare_payloads(payload1, payload2)
