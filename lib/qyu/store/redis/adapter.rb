@@ -8,7 +8,7 @@ module Qyu
 
         class << self
           def valid_config?(config)
-            true
+            ConfigurationValidator.new(config).valid?
           end
         end
 
@@ -16,6 +16,86 @@ module Qyu
           init_client(config)
         end
 
+        ## Workflow
+        def persist_workflow(name, descriptor)
+          id = SecureRandom.uuid
+          # TODO: Name must be uniq
+          key = "workflow:#{name}:#{id}"
+          @client.hmset(key, :name, name, :id, id, :descriptor, serialize { descriptor })
+          { 'name' => name, 'id' => id, 'descriptor' => descriptor }
+        end
+
+        def find_workflow(id)
+          workflow_key = @client.keys("workflow:*:#{id}").first
+          return if workflow_key.nil?
+          workflow = @client.hgetall(workflow_key)
+          workflow['descriptor'] = parse { workflow['descriptor'] }
+          workflow
+        end
+
+        def find_workflow_by_name(name)
+          workflow_key = @client.keys("workflow:#{name}:*").first
+          return if workflow_key.nil?
+          workflow = @client.hgetall(workflow_key)
+          workflow['descriptor'] = parse { workflow['descriptor'] }
+          workflow
+        end
+
+        def delete_workflow(id)
+          # TODO
+        end
+
+        def delete_workflow_by_name(name)
+          # TODO
+        end
+
+        ## Job
+        def persist_job(workflow, payload)
+          id = SecureRandom.uuid
+          key = "job:#{id}"
+          @client.hmset(key, 
+            :id, id, 
+            :workflow, serialize { workflow }, 
+            :payload, serialize { payload }
+          )
+          { 'id' => id, 'workflow' => workflow, 'payload' => payload }
+        end
+
+        def find_job(id)
+          job = @client.hgetall("job:#{id}")
+          return if job.eql?({})
+          job['id'] = id
+          job['payload'] = parse { job['payload'] }
+          job['workflow'] = parse { job['workflow'] }
+          job
+        end
+
+        def select_jobs(limit, offset, order = nil)
+          job_keys = @client.keys('job:*')
+          partial_job_keys = job_keys[offset.to_i, limit.to_i]
+          return [] unless partial_job_keys
+          
+          partial_job_keys.map do |job_key|
+            job = @client.hgetall(job_key)
+            job['payload'] = parse { job['payload'] }
+            job['workflow'] = parse { job['workflow'] }
+            job
+          end
+        end
+
+        def count_jobs
+          @client.keys("job:*").count
+        end
+
+        def delete_job(id)
+          # TODO
+        end
+
+        def clear_completed_jobs
+          # TODO
+        end
+
+        ## Task
         def find_or_persist_task(name, queue_name, payload, job_id, parent_task_id)
           task_id = nil
           existent_keys = @client.keys("task:#{name}:#{queue_name}:#{job_id}:#{parent_task_id}:*")
@@ -47,41 +127,6 @@ module Qyu
           task_id
         end
 
-        def persist_workflow(name, descriptor)
-          id = SecureRandom.uuid
-          # TODO: Name must be uniq
-          key = "workflow:#{name}:#{id}"
-          @client.hmset(key, :name, name, :id, id, :descriptor, serialize { descriptor })
-          { 'name' => name, 'id' => id, 'descriptor' => descriptor }
-        end
-
-        def persist_job(workflow, payload)
-          id = SecureRandom.uuid
-          key = "job:#{id}"
-          @client.hmset(key, 
-            :id, id, 
-            :workflow, serialize { workflow }, 
-            :payload, serialize { payload }
-          )
-          { 'id' => id, 'workflow' => workflow, 'payload' => payload }
-        end
-
-        def find_workflow(id)
-          workflow_key = @client.keys("workflow:*:#{id}").first
-          return if workflow_key.nil?
-          workflow = @client.hgetall(workflow_key)
-          workflow['descriptor'] = parse { workflow['descriptor'] }
-          workflow
-        end
-
-        def find_workflow_by_name(name)
-          workflow_key = @client.keys("workflow:#{name}:*").first
-          return if workflow_key.nil?
-          workflow = @client.hgetall(workflow_key)
-          workflow['descriptor'] = parse { workflow['descriptor'] }
-          workflow
-        end
-
         def find_task(id)
           task_key = @client.keys("task:*:*:*:*:#{id}").first
           return if task_key.nil?
@@ -108,28 +153,6 @@ module Qyu
           end.uniq
         end
 
-        def find_job(id)
-          job = @client.hgetall("job:#{id}")
-          return if job.eql?({})
-          job['id'] = id
-          job['payload'] = parse { job['payload'] }
-          job['workflow'] = parse { job['workflow'] }
-          job
-        end
-
-        def select_jobs(limit, offset, order = nil)
-          job_keys = @client.keys('job:*')
-          partial_job_keys = job_keys[offset.to_i, limit.to_i]
-          return [] unless partial_job_keys
-          
-          partial_job_keys.map do |job_key|
-            job = @client.hgetall(job_key)
-            job['payload'] = parse { job['payload'] }
-            job['workflow'] = parse { job['workflow'] }
-            job
-          end
-        end
-
         def select_tasks_by_job_id(job_id)
           task_keys = @client.keys("task:*:*:#{job_id}:*:*")
           return if task_keys.empty?
@@ -138,10 +161,6 @@ module Qyu
             task['payload'] = parse { task['payload'] }
             task
           end
-        end
-
-        def count_jobs
-          @client.keys("job:*").count
         end
 
         def lock_task!(id, lease_time)
@@ -201,12 +220,8 @@ module Qyu
           @client.hmset(task_key, 'status', status).eql?('OK')
         end
 
-        def serialize
-          yield.to_json
-        end
-
-        def parse
-          JSON.parse(yield)
+        def with_connection
+          yield
         end
 
         def transaction
@@ -215,6 +230,14 @@ module Qyu
         end
 
         private
+
+        def serialize
+          yield.to_json
+        end
+
+        def parse
+          JSON.parse(yield)
+        end
 
         def compare_payloads(payload1, payload2)
           symbolize_hash(payload1) == symbolize_hash(payload2)
@@ -238,7 +261,7 @@ module Qyu
               host: config[:host],
               port: config[:port],
               password: config[:password],
-              db: config[:db]
+              db: config.fetch(:db) { 0 }
             }.compact
           end
 
@@ -258,6 +281,3 @@ module Qyu
     end
   end
 end
-
-Qyu::Config::StoreConfig.register(Qyu::Store::Redis::Adapter) if defined?(Qyu::Config::StoreConfig)
-Qyu::Factory::StoreFactory.register(Qyu::Store::Redis::Adapter) if defined?(Qyu::Factory::StoreFactory)

@@ -3,8 +3,25 @@ RSpec.describe Qyu::Store::Redis::Adapter do
 
   describe '.valid_config?' do
     context 'input config is valid' do
+      context 'when using url' do
+        it do
+          config = { url: 'redis://foo.bar' }
+          expect(described_class.valid_config?(config)).to be true
+        end
+      end
+
+      context 'when using separate configs' do
+        it do
+          expect(described_class.valid_config?(redis_config)).to be true
+        end
+      end
+    end
+
+    context 'input config is invalid' do
       it do
-        expect(described_class.valid_config?({})).to be true
+        config = redis_config
+        config.delete(:host)
+        expect(described_class.valid_config?(config)).to be false
       end
     end
   end

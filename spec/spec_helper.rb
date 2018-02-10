@@ -6,7 +6,6 @@ require 'logger'
 
 SimpleCov.start
 
-require 'qyu'
 require "qyu/store/redis"
 
 require 'pry'
