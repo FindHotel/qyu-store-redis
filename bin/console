@@ -1,8 +1,8 @@
 #!/usr/bin/env ruby
 
-require "bundler/setup"
-require "qyu"
-require "qyu/store/redis"
+require 'bundler/setup'
+require 'qyu'
+require 'qyu/store/redis'
 
 # You can add fixtures and/or initialization code here to make experimenting
 # with your gem easier. You can also use a different console, if you like.
@@ -11,5 +11,5 @@ require "qyu/store/redis"
 # require "pry"
 # Pry.start
 
-require "pry"
+require 'pry'
 Pry.start
